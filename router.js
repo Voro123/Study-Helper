@@ -136,11 +136,11 @@ router
   })
 
   // 添加词条
-  .get('/api/insert/h3', function (req, res) {
-    const name = Tools.tosqlstr(req.query['name'])
-    const introduce = Tools.tosqlstr(req.query['introduce'])
-    const parents = Tools.tosqlstr(req.query['parents'])
-    const graparents = Tools.tosqlstr(req.query['graparents'])
+  .post('/api/insert/h3', function (req, res) {
+    const name = Tools.tosqlstr(req.body['name'])
+    const introduce = Tools.tosqlstr(req.body['introduce'])
+    const parents = Tools.tosqlstr(req.body['parents'])
+    const graparents = Tools.tosqlstr(req.body['graparents'])
     //检测当前1级目录下是否已有同名目录
     var cmdstr = `select id from dt_h2 where name="${parents}" and parents="${graparents}"`
     dbHelper.DbSelect(cmdstr, function (getData) {
@@ -155,7 +155,8 @@ router
           res.send(false)
           return;
         }
-        cmdstr = `insert into dt_h3(name,introduce,parentsID) values("${name}","${introduce}",${id})`
+        const today = Tools.transformDate(new Date())
+        cmdstr = `insert into dt_h3(name,introduce,parentsID,date) values("${name}","${introduce}",${id},"${today}")`
         dbHelper.DbExecute(cmdstr, function (getData) {
           res.send(getData)
         })
@@ -181,19 +182,21 @@ router
   })
 
   // 编辑词条
-  .get('/api/update/h3', function (req, res) {
-    const id = req.query['id']
-    const new_name = Tools.tosqlstr(req.query['new_name'])
-    const new_introduce = Tools.tosqlstr(req.query['new_introduce'])
-    //检测当前目录下是否已有同名词条
+  .post('/api/update/h3', function (req, res) {
+    const id = req.body['id']
+    const new_name = Tools.tosqlstr(req.body['new_name'])
+    const new_introduce = Tools.tosqlstr(req.body['new_introduce'])
+    // 检测当前目录下是否已有同名词条
     var cmdstr = `select * from dt_h3 where name="${new_name}" and\
-     parentsID=(select parentsID from dt_h3 where id=${id})`
+     parentsID=(select parentsID from dt_h3 where id=${id}) and id!=${id}`
     dbHelper.DbSelect(cmdstr, function (getData) {
-      if (getData.length > 1) {
+      if (getData.length !== 0) {
         res.send(false)
         return;
       }
-      cmdstr = `update dt_h3 set name="${new_name}",introduce="${new_introduce}" where id=${id}`
+      const today = Tools.transformDate(new Date())
+      cmdstr = `update dt_h3 set name="${new_name}",introduce="${new_introduce}"\
+      ,date="${today}" where id=${id}`
       dbHelper.DbExecute(cmdstr, function (getData) {
         res.send(getData)
       })
@@ -204,7 +207,7 @@ router
   .get('/api/resort/h3', function (req, res) {
     const dragger_id = req.query['dragger_id']
     const dropper_id = req.query['dropper_id']
-    // dropper_id(释放点上一个兄弟结点)为null的情况
+
     var cmdstr = `select parentsID from dt_h3 where id=${dragger_id}`
     dbHelper.DbSelect(cmdstr, function (getData) {
       if (getData.length === 0) {
@@ -213,6 +216,7 @@ router
       }
       var parentsID = getData[0]['parentsID']
 
+      // dropper_id(释放点上一个兄弟结点)为null的情况
       if (!dropper_id) {
         cmdstr = `select max(sort) from dt_h3 where parentsID=${parentsID}`
         dbHelper.DbSelect(cmdstr, function (getData) {
@@ -251,7 +255,202 @@ router
         })
       })
     })
-
   })
 
-module.exports = router;
+  // 搜索词条
+  /* 定义的规则:
+  1.以空格为分隔,取每段表达式匹配结果的交集,且不区分大小写。
+
+  2.表达式左右不用任何设定符号包裹,如(),[],{},表示同时匹配词条名和词条介绍,
+  会返回匹配结果的并集。
+  示例:'aaa'=>匹配词条名或词条介绍中包含aaa的词条
+
+  3.表达式左右使用()包裹,视为只匹配词条名。
+  示例:'(aaa)'=>匹配词条名包含aaa的词条
+  
+  4.表达式左右使用[]包裹,视为只匹配词条介绍。
+  示例:'[aaa]'=>匹配词条介绍包含aaa的词条
+
+  5.表达式左右使用{}包裹,视为匹配指定目录下的词条。
+  以>分隔,左边视为1级目录匹配,右边视为2级目录匹配,若置空表示匹配全部。
+  实例:'aaa>bbb'=>匹配1级目录'aaa'下的2级目录'bbb'下的所有词条
+       'aaa>'=>匹配1级目录'aaa'下的所有词条
+       '>bbb'=>匹配2级目录名为'bbb'下的所有词条
+  
+  6.表达式的格式为$..(..)时,认为使用特殊搜索条件。
+  $后面的字符串到左括号位置的字符串认为是特殊搜索键名。
+  ()内的字符串认为是特殊搜索键值。
+  不存在的特殊搜索键名会被无视。
+  实例:'$history(3)'=>history会搜索前n天的录入词条,因此这里会搜索前3天的录入词条
+
+  7.若表达式只有一个字符'*',表示匹配所有。
+  示例:'*'=>匹配所有词条
+
+  */
+  .post('/api/selectWords', function (req, res) {
+    const content = req.body['content']
+    const arr = content.split(/ +/g) // 按空格分割传来的数据
+    if (arr[0] === '') {
+      return res.send([])
+    }
+    var arrName = []
+    var arrIntroduce = []
+    var arrFolders = []
+    var objSpecial = {}
+    var arrAll = []
+
+    var temp
+    for (let val of arr) {
+      if (val === '') {
+        continue
+      }
+      // 若两边是(),表示只匹配词条名
+      if (/^\(.*\)$/g.test(val)) {
+        arrpush(arrName, val)
+      }
+      // 若两边是[],表示只匹配词条详细信息
+      else if (/^\[.*\]$/g.test(val)) {
+        arrpush(arrIntroduce, val)
+      }
+      // 若两边是{},表示匹配词条目录
+      else if (/^\{.*\}$/g.test(val)) {
+        arrpush(arrFolders, val)
+      }
+      // 若为$..(..)的形式,表示特殊查找
+      else if (temp = val.match(/^\$(.*)\((.*)\)$/)) {
+        objSpecial[temp[1]] = temp[2]
+      }
+      else {
+        arrpush(arrAll, val, true)
+      }
+    }
+
+    // 添加数组统一方法
+    function arrpush (arr, val, flag/* 布尔值,指示是否带成对符号 */) {
+      // 设置flag的默认值为false
+      flag = flag || false
+
+      if (!flag) {
+        val = val.slice(1, -1)
+      }
+      // 如果值为*,当做通配符,即可以匹配任何信息
+      val = val !== '*' ? val : ''
+      arr.push(val)
+
+    }
+
+    // 查询包含词条名或详细信息中包含按空格所分割的字符的词条集合
+    var cmdstr = `select * from dt_h3 where `
+
+    // 判断没有查询词条名或词条信息的情况,附加条件字符串
+    var cmdstrAfter = ``
+    var flag = false
+
+    function addConcatChar () {
+      if (flag === false) {
+        flag = true
+      }
+      else {
+        cmdstrAfter += ` and `
+      }
+    }
+
+    for (let val of arrAll) {
+      addConcatChar()
+      cmdstrAfter += `(name like "%${val}%" or introduce like "%${val}%")`
+    }
+
+    for (let val of arrName) {
+      addConcatChar()
+      cmdstrAfter += `name like "%${val}%"`
+    }
+    for (let val of arrIntroduce) {
+      addConcatChar()
+      cmdstrAfter += `introduce like "%${val}%"`
+    }
+    for (let key in objSpecial) {
+      switch (key) {
+        case 'history': {
+          addConcatChar()
+          // 如果没有输入对应值,查询前一天的数据
+          if (objSpecial[key] === '') {
+            objSpecial[key] = 1
+          }
+          objSpecial[key] = Number(objSpecial[key])
+          // 如果输入的不是数字,不会到匹配词条
+          if (typeof objSpecial[key] !== 'number' || isNaN(objSpecial[key])) {
+            break
+          }
+
+          cmdstrAfter += `to_days(now()) - to_days(date) = ${objSpecial[key]}`
+          break
+        }
+        default: {
+        }
+      }
+    }
+    for (let val of arrFolders) {
+      addConcatChar()
+      let temparr = val.split('>')
+      let h1_name = temparr[0] || '%'
+      let h2_name = temparr[1] || '%'
+      if (h1_name === '*') {
+        h1_name = '%'
+      }
+      if (h2_name === '*') {
+        h2_name = '%'
+      }
+      temparr = null
+      cmdstrAfter += `parentsID in (select id from dt_h2 where parents like \
+         "${h1_name}" and name like "${h2_name}")`
+    }
+
+    cmdstr += cmdstrAfter
+    dbHelper.DbSelect(cmdstr, function (getData) {
+      res.send(getData)
+    })
+  })
+
+  // 查询历史添加词条(近三天)
+  .post('/api/getHistory', function (req, res) {
+    const date = req.body['date']
+    var cmdstr = null
+    switch (date) {
+      case '今天': {
+        cmdstr = `select * from dt_h3 where to_days(now()) - to_days(date) = 0`
+        break
+      }
+      case '昨天': {
+        cmdstr = `select * from dt_h3 where to_days(now()) - to_days(date) = 1`
+        break
+      }
+      case '前天': {
+        cmdstr = `select * from dt_h3 where to_days(now()) - to_days(date) = 2`
+        break
+      }
+    }
+    dbHelper.DbSelect(cmdstr, function (getData) {
+      res.send(getData)
+    })
+  })
+
+  // 修改词条过滤
+  .post('/api/h3_changeAppear', function (req, res) {
+    const id = req.body['id']
+    const toval = req.body['toval']
+    let cmdstr = `update dt_h3 set noappear=${toval} where id=${id}`
+    dbHelper.DbExecute(cmdstr, function (getData) {
+      res.send(getData)
+    })
+  })
+
+  // 查询过滤词条
+  .post('/api/h3_getAppearWords', function (req, res) {
+    let cmdstr = `select * from dt_h3 where noappear=1`
+    dbHelper.DbSelect(cmdstr, function (getData) {
+      res.send(getData)
+    })
+  })
+
+
+module.exports = router
