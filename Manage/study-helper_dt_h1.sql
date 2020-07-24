@@ -26,7 +26,7 @@ CREATE TABLE `dt_h1` (
   `id` int NOT NULL AUTO_INCREMENT,
   `name` varchar(20) NOT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=48 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=94 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -35,7 +35,7 @@ CREATE TABLE `dt_h1` (
 
 LOCK TABLES `dt_h1` WRITE;
 /*!40000 ALTER TABLE `dt_h1` DISABLE KEYS */;
-INSERT INTO `dt_h1` VALUES (1,'HTML'),(2,'CSS'),(3,'JavaScript'),(4,'Vue'),(8,'npm'),(9,'webpack'),(10,'Node.js'),(41,'JQuery'),(42,'HTML5'),(45,'其他');
+INSERT INTO `dt_h1` VALUES (1,'HTML'),(2,'CSS'),(3,'JavaScript'),(4,'Vue'),(8,'npm'),(9,'webpack'),(10,'Node.js'),(41,'JQuery'),(42,'HTML5'),(45,'其他'),(93,'MarkDown');
 /*!40000 ALTER TABLE `dt_h1` ENABLE KEYS */;
 UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
@@ -48,4 +48,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2020-06-21 15:50:47
+-- Dump completed on 2020-07-24 16:44:34
